@@ -171,20 +171,43 @@ this exact format, no other text, no markdown fences:
     params = {"key": GEMINI_API_KEY}
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"maxOutputTokens": 400, "temperature": 0.2},
+        "generationConfig": {"maxOutputTokens": 1000, "temperature": 0.2},
     }
 
-    try:
-        resp = requests.post(GEMINI_API_URL, headers=headers, params=params, json=body, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-        text = text.replace("```json", "").replace("```", "").strip()
-        parsed = json.loads(text)
-        return parsed
-    except Exception as e:
-        print(f"Classification failed for '{article['title']}': {e}")
-        return {"is_deal": False}
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(GEMINI_API_URL, headers=headers, params=params, json=body, timeout=30)
+
+            if resp.status_code == 429:
+                wait = 15 * (attempt + 1)  # 15s, 30s, 45s, 60s, 75s
+                print(f"Rate limited (429) on '{article['title'][:50]}...' — waiting {wait}s (attempt {attempt+1}/{max_retries})")
+                time.sleep(wait)
+                continue
+
+            resp.raise_for_status()
+            data = resp.json()
+            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            text = text.replace("```json", "").replace("```", "").strip()
+
+            # Defensively extract just the JSON object in case of stray text
+            # or a truncated response (take the outermost braces found).
+            start = text.find("{")
+            end = text.rfind("}")
+            if start == -1 or end == -1 or end < start:
+                raise ValueError(f"No JSON object found in response: {text[:200]!r}")
+            text = text[start:end + 1]
+
+            parsed = json.loads(text)
+            return parsed
+
+        except Exception as e:
+            print(f"Classification failed for '{article['title']}': {e}")
+            return {"is_deal": False}
+
+    # Exhausted retries (kept getting rate limited)
+    print(f"Giving up on '{article['title']}' after {max_retries} rate-limit retries.")
+    return {"is_deal": False}
 
 
 # ---------------------------------------------------------------------
@@ -271,7 +294,7 @@ def main():
             continue
 
         result = classify_article(article)
-        time.sleep(1)  # gentle rate limiting
+        time.sleep(5)  # respect Gemini free-tier rate limit (~15 requests/min)
 
         if result.get("is_deal"):
             result["link"] = article["link"]

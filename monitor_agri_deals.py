@@ -28,7 +28,7 @@ GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "your_16_char_app_pass
 RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", "your_recipient_email@gmail.com")
 
 SEEN_FILE = "seen_deals.json"
-LOOKBACK_HOURS = 6  # how far back to consider "new" news each run
+LOOKBACK_HOURS = 72  # TEMP: widened for testing so it's easier to confirm the pipeline works. Set back to 6 once confirmed.
 
 # Transaction types to track
 TRANSACTION_TYPES = [
@@ -78,11 +78,18 @@ SECTORS = [
     "AgriTech",
 ]
 
-# Build search queries: each sector combined with an OR-group of all
-# transaction types, e.g. "India Rice (acquisition OR merger OR ... )"
-# This keeps the number of RSS calls per run equal to len(SECTORS)
-# instead of len(SECTORS) x len(TRANSACTION_TYPES).
-_transaction_or_group = " OR ".join(TRANSACTION_TYPES)
+# Build search queries: each sector combined with a short OR-group of
+# broad transaction terms. Google News RSS becomes unreliable with long
+# OR chains, so we keep this list short — the precise deal type (from the
+# full TRANSACTION_TYPES list above) is still extracted accurately by
+# Gemini from each article's actual text, regardless of which broad term
+# matched the search.
+_SEARCH_TERMS = ["acquisition", "merger", "investment", "stake sale", "IPO", "partnership"]
+
+def _format_term(term):
+    return f'"{term}"' if " " in term else term
+
+_transaction_or_group = " OR ".join(_format_term(t) for t in _SEARCH_TERMS)
 SEARCH_QUERIES = [
     f"India {sector} ({_transaction_or_group})" for sector in SECTORS
 ]

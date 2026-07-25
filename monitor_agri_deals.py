@@ -28,7 +28,7 @@ GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "your_16_char_app_pass
 RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", "your_recipient_email@gmail.com")
 
 SEEN_FILE = "seen_deals.json"
-LOOKBACK_HOURS = 72  # TEMP: widened for testing so it's easier to confirm the pipeline works. Set back to 6 once confirmed.
+LOOKBACK_HOURS = 6  # how far back to consider "new" news each run
 
 # Transaction types to track
 TRANSACTION_TYPES = [

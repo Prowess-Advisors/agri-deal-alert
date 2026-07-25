@@ -17,6 +17,7 @@ import feedparser
 import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.header import Header
 from datetime import datetime, timedelta, timezone
 
 # ---------------------------------------------------------------------
@@ -242,45 +243,114 @@ def deal_key(deal):
 # ---------------------------------------------------------------------
 # STEP 4: Build and send email
 # ---------------------------------------------------------------------
+
+# Badge colors per deal type, used to visually distinguish rows at a glance
+_DEAL_TYPE_COLORS = {
+    "acquisition": "#2563eb",
+    "merger": "#7c3aed",
+    "fund raising": "#059669",
+    "pe investment": "#059669",
+    "vc investment": "#059669",
+    "joint venture": "#d97706",
+    "strategic partnership": "#d97706",
+    "stake sale": "#dc2626",
+    "ipo": "#0891b2",
+    "asset acquisition": "#2563eb",
+    "plant acquisition": "#2563eb",
+    "distribution partnership": "#d97706",
+}
+
+
+def _badge(text, color):
+    return (
+        f'<span style="display:inline-block;padding:3px 10px;border-radius:12px;'
+        f'background:{color}1a;color:{color};font-size:12px;font-weight:600;'
+        f'white-space:nowrap;">{text}</span>'
+    )
+
+
 def send_email(deals):
     if not deals:
         print("No new deals found — no email sent.")
         return
 
     today = datetime.now().strftime("%d %b %Y")
-    subject = f"India Food & Agri Transaction Alert – {len(deals)} new deal(s) – {today}"
+    subject = f"🌾 India Food & Agri Alert – {len(deals)} new deal(s) – {today}"
 
     rows_html = ""
-    for d in deals:
+    for i, d in enumerate(deals):
+        deal_type = d.get("deal_type", "") or "—"
+        color = _DEAL_TYPE_COLORS.get(deal_type.strip().lower(), "#475569")
+        row_bg = "#ffffff" if i % 2 == 0 else "#f8fafc"
+
         rows_html += f"""
-        <tr>
-          <td>{d.get('deal_date', '')}</td>
-          <td>{d.get('buyer', '')}</td>
-          <td>{d.get('target', '')}</td>
-          <td>{d.get('deal_type', '')}</td>
-          <td>{d.get('sector', '')}</td>
-          <td>{d.get('deal_value', '')}</td>
-          <td><a href="{d.get('link', '')}">Link</a></td>
+        <tr style="background:{row_bg};">
+          <td style="padding:14px 16px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#64748b;white-space:nowrap;">{d.get('deal_date', '')}</td>
+          <td style="padding:14px 16px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#0f172a;font-weight:600;">{d.get('buyer', '')}</td>
+          <td style="padding:14px 16px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#0f172a;">→ {d.get('target', '')}</td>
+          <td style="padding:14px 16px;border-bottom:1px solid #e5e7eb;">{_badge(deal_type, color)}</td>
+          <td style="padding:14px 16px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#334155;">{d.get('sector', '')}</td>
+          <td style="padding:14px 16px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#0f172a;font-weight:600;">{d.get('deal_value', '')}</td>
+          <td style="padding:14px 16px;border-bottom:1px solid #e5e7eb;">
+            <a href="{d.get('link', '')}" style="color:#059669;font-size:13px;font-weight:600;text-decoration:none;">View →</a>
+          </td>
         </tr>
         """
 
     html = f"""
-    <html><body>
-    <h2>India Food & Agri Business Transaction Alert</h2>
-    <p>{len(deals)} new transaction(s) detected:</p>
-    <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px;">
-      <tr style="background:#f2f2f2;">
-        <th>Date</th><th>Buyer</th><th>Target</th><th>Deal Type</th>
-        <th>Sector</th><th>Deal Value</th><th>Source</th>
-      </tr>
-      {rows_html}
-    </table>
-    <p style="font-size:12px;color:#666;">Summaries omitted from table for readability — click Source for full article.</p>
-    </body></html>
+    <html>
+    <body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 0;">
+        <tr>
+          <td align="center">
+            <table role="presentation" width="720" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+
+              <!-- Header -->
+              <tr>
+                <td style="background:linear-gradient(135deg,#166534,#059669);padding:28px 32px;">
+                  <div style="font-size:20px;font-weight:700;color:#ffffff;">🌾 India Food & Agri Deal Alert</div>
+                  <div style="font-size:13px;color:#d1fae5;margin-top:4px;">{today} &nbsp;•&nbsp; {len(deals)} new transaction{'s' if len(deals) != 1 else ''} detected</div>
+                </td>
+              </tr>
+
+              <!-- Table -->
+              <tr>
+                <td style="padding:8px 0;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                    <tr style="background:#f8fafc;">
+                      <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Date</th>
+                      <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Buyer</th>
+                      <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Target</th>
+                      <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Type</th>
+                      <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Sector</th>
+                      <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Value</th>
+                      <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">Source</th>
+                    </tr>
+                    {rows_html}
+                  </table>
+                </td>
+              </tr>
+
+              <!-- Footer -->
+              <tr>
+                <td style="padding:20px 32px;background:#f8fafc;border-top:1px solid #e5e7eb;">
+                  <div style="font-size:12px;color:#94a3b8;line-height:1.6;">
+                    Summaries omitted for readability — click "View" to read the full source article.<br>
+                    Automated alert generated from India Food &amp; Agri sector news monitoring.
+                  </div>
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
     """
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
+    msg["Subject"] = Header(subject, "utf-8")
     msg["From"] = GMAIL_ADDRESS
     msg["To"] = RECIPIENT_EMAIL
     msg.attach(MIMEText(html, "html"))

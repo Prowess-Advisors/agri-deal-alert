@@ -203,11 +203,11 @@ this exact format, no other text, no markdown fences:
 
         except Exception as e:
             print(f"Classification failed for '{article['title']}': {e}")
-            return {"is_deal": False}
+            return {"is_deal": False, "_error": True}
 
     # Exhausted retries (kept getting rate limited)
     print(f"Giving up on '{article['title']}' after {max_retries} rate-limit retries.")
-    return {"is_deal": False}
+    return {"is_deal": False, "_error": True}
 
 
 # ---------------------------------------------------------------------
@@ -300,7 +300,12 @@ def main():
             result["link"] = article["link"]
             new_deals.append(result)
 
-        newly_seen.add(article["link"])
+        # Only blacklist this article if it was actually evaluated
+        # successfully. If classification errored/rate-limited, leave it
+        # unmarked so it gets retried on the next run instead of being
+        # silently lost forever.
+        if not result.get("_error"):
+            newly_seen.add(article["link"])
 
     send_email(new_deals)
     save_seen(newly_seen)

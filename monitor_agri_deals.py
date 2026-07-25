@@ -158,8 +158,8 @@ this exact format, no other text, no markdown fences:
 {{
   "is_deal": true,
   "deal_date": "DD-Mon-YYYY, use the article's published/reported date if mentioned, otherwise today's date",
-  "buyer": "...",
-  "target": "...",
+  "buyer": "the buyer's core company name only, no legal suffixes like Ltd/Pvt Ltd/Limited and no descriptive words",
+  "target": "the target's core company/brand name only, no legal suffixes like Ltd/Pvt Ltd/Limited and no descriptive words",
   "deal_type": "Acquisition / Merger / Fund Raising / PE Investment / VC Investment / Joint Venture / Strategic Partnership / Stake Sale / IPO / Asset Acquisition / Plant Acquisition / Distribution Partnership",
   "sector": "...",
   "deal_value": "e.g. ₹245 Crore or 'Undisclosed'",
@@ -214,15 +214,29 @@ this exact format, no other text, no markdown fences:
 # STEP 3: Dedup against previously emailed deals
 # ---------------------------------------------------------------------
 def load_seen():
+    """Returns (seen_links: set, seen_deal_keys: set)."""
     if os.path.exists(SEEN_FILE):
         with open(SEEN_FILE, "r") as f:
-            return set(json.load(f))
-    return set()
+            data = json.load(f)
+        # Support the old format (a plain list of links) for backward compat.
+        if isinstance(data, list):
+            return set(data), set()
+        return set(data.get("links", [])), set(data.get("deal_keys", []))
+    return set(), set()
 
 
-def save_seen(seen_links):
+def save_seen(seen_links, seen_deal_keys):
     with open(SEEN_FILE, "w") as f:
-        json.dump(list(seen_links), f)
+        json.dump({"links": list(seen_links), "deal_keys": list(seen_deal_keys)}, f)
+
+
+def deal_key(deal):
+    """A normalized signature identifying the underlying deal, so the same
+    transaction reported by multiple outlets is only counted/emailed once."""
+    buyer = (deal.get("buyer") or "").strip().lower()
+    target = (deal.get("target") or "").strip().lower()
+    deal_type = (deal.get("deal_type") or "").strip().lower()
+    return f"{buyer}|{target}|{deal_type}"
 
 
 # ---------------------------------------------------------------------
@@ -282,15 +296,15 @@ def send_email(deals):
 # MAIN
 # ---------------------------------------------------------------------
 def main():
-    seen = load_seen()
+    seen_links, seen_deal_keys = load_seen()
     articles = fetch_news()
     print(f"Fetched {len(articles)} candidate articles.")
 
-    new_deals = []
-    newly_seen = set(seen)
+    candidate_deals = []
+    newly_seen_links = set(seen_links)
 
     for article in articles:
-        if article["link"] in seen:
+        if article["link"] in seen_links:
             continue
 
         result = classify_article(article)
@@ -298,17 +312,29 @@ def main():
 
         if result.get("is_deal"):
             result["link"] = article["link"]
-            new_deals.append(result)
+            candidate_deals.append(result)
 
         # Only blacklist this article if it was actually evaluated
         # successfully. If classification errored/rate-limited, leave it
         # unmarked so it gets retried on the next run instead of being
         # silently lost forever.
         if not result.get("_error"):
-            newly_seen.add(article["link"])
+            newly_seen_links.add(article["link"])
+
+    # Dedupe: multiple articles from different outlets often cover the same
+    # underlying deal. Keep only the first occurrence of each (buyer, target,
+    # deal_type) signature, and skip any deal already emailed in a past run.
+    new_deals = []
+    newly_seen_deal_keys = set(seen_deal_keys)
+    for deal in candidate_deals:
+        key = deal_key(deal)
+        if key in newly_seen_deal_keys:
+            continue
+        newly_seen_deal_keys.add(key)
+        new_deals.append(deal)
 
     send_email(new_deals)
-    save_seen(newly_seen)
+    save_seen(newly_seen_links, newly_seen_deal_keys)
 
 
 if __name__ == "__main__":

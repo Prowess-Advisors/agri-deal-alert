@@ -96,7 +96,7 @@ SEARCH_QUERIES = [
 ]
 
 
-GEMINI_MODEL = "gemini-flash-latest"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 
@@ -414,7 +414,7 @@ def main():
             continue
 
         result = classify_article(article)
-        time.sleep(5)  # respect Gemini free-tier rate limit (~15 requests/min)
+        time.sleep(6)  # respect gemini-2.5-flash-lite free-tier limit (~15 RPM)
 
         if result.get("is_deal"):
             result["link"] = article["link"]

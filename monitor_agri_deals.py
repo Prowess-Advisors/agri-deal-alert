@@ -92,7 +92,7 @@ def _format_term(term):
 
 _transaction_or_group = " OR ".join(_format_term(t) for t in _SEARCH_TERMS)
 SEARCH_QUERIES = [
-    f"India {sector} ({_transaction_or_group})" for sector in SECTORS
+    f"India {sector} ({_transaction_or_group}) when:{LOOKBACK_HOURS}h" for sector in SECTORS
 ]
 
 
@@ -120,6 +120,7 @@ def fetch_news():
 
     total_raw_entries = 0
     failed_queries = 0
+    all_published_dates = []
 
     for query in SEARCH_QUERIES:
         url = f"https://news.google.com/rss/search?q={requests.utils.quote(query)}&hl=en-IN&gl=IN&ceid=IN:en"
@@ -144,6 +145,8 @@ def fetch_news():
             except Exception:
                 published = datetime.now(timezone.utc)
 
+            all_published_dates.append(published)
+
             if published < cutoff:
                 continue
 
@@ -155,6 +158,10 @@ def fetch_news():
             })
 
     print(f"Raw RSS entries across all queries (before date filtering): {total_raw_entries}. Failed queries: {failed_queries}/{len(SEARCH_QUERIES)}.")
+    if all_published_dates:
+        newest = max(all_published_dates)
+        oldest = min(all_published_dates)
+        print(f"Publish date range in raw results: oldest={oldest.isoformat()}, newest={newest.isoformat()}. Cutoff (now - {LOOKBACK_HOURS}h)={cutoff.isoformat()}.")
 
     # Dedupe by link within this run
     seen_links = set()

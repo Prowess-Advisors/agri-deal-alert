@@ -107,9 +107,36 @@ def fetch_news():
     articles = []
     cutoff = datetime.now(timezone.utc) - timedelta(hours=LOOKBACK_HOURS)
 
+    # Google News (and many sites) silently reject or short-change requests
+    # that don't look like they're from a real browser. feedparser's default
+    # request has no such header, so we fetch manually with one.
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-IN,en;q=0.9",
+    }
+
+    total_raw_entries = 0
+    failed_queries = 0
+
     for query in SEARCH_QUERIES:
         url = f"https://news.google.com/rss/search?q={requests.utils.quote(query)}&hl=en-IN&gl=IN&ceid=IN:en"
-        feed = feedparser.parse(url)
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            status = resp.status_code
+            feed = feedparser.parse(resp.content)
+        except Exception as e:
+            print(f"  [fetch error] query={query!r} exception={e}")
+            failed_queries += 1
+            continue
+
+        n_entries = len(feed.entries)
+        total_raw_entries += n_entries
+
+        if status != 200 or (n_entries == 0 and feed.get("bozo")):
+            print(f"  [diagnostic] query={query!r} http_status={status} entries={n_entries} bozo={feed.get('bozo')} bozo_exception={feed.get('bozo_exception')}")
 
         for entry in feed.entries:
             try:
@@ -126,6 +153,8 @@ def fetch_news():
                 "published": published.isoformat(),
                 "summary": getattr(entry, "summary", ""),
             })
+
+    print(f"Raw RSS entries across all queries (before date filtering): {total_raw_entries}. Failed queries: {failed_queries}/{len(SEARCH_QUERIES)}.")
 
     # Dedupe by link within this run
     seen_links = set()

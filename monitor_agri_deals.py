@@ -96,7 +96,7 @@ SEARCH_QUERIES = [
 ]
 
 
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-flash-latest"
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 
@@ -177,23 +177,39 @@ def fetch_news():
 # ---------------------------------------------------------------------
 # STEP 2: Use Gemini to classify + extract structured deal info
 # ---------------------------------------------------------------------
-def classify_article(article):
+BATCH_SIZE = 15  # articles per Gemini call — cuts ~28 calls/run down to ~2
+
+
+def _chunked(items, size):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
+def classify_batch(articles):
+    """Classifies a batch of articles in a single Gemini call. Returns a list
+    of dicts (same length/order as `articles` is not guaranteed — match back
+    by index using the 'i' field each result carries)."""
+
+    numbered_articles = "\n\n".join(
+        f"[{i}] Title: {a['title']}\nSnippet: {a['summary']}\nPublished: {a['published']}"
+        for i, a in enumerate(articles)
+    )
+
     prompt = f"""You are filtering Indian business news for genuine Food & Agriculture
 sector TRANSACTIONS only (acquisitions, mergers, investments, joint ventures,
 stake sales, IPOs, asset/plant acquisitions, distribution partnerships).
 
-Article title: {article['title']}
-Article snippet: {article['summary']}
-Article published date: {article['published']}
-Link: {article['link']}
+Below are {len(articles)} numbered articles. For EACH one, decide if it is a
+genuine Food/Agri transaction in India.
 
-If this is NOT a genuine Food/Agri transaction in India, respond with exactly:
-{{"is_deal": false}}
+{numbered_articles}
 
-If it IS a genuine Food/Agri transaction in India, respond ONLY with JSON in
-this exact format, no other text, no markdown fences:
+Respond ONLY with a JSON array, no other text, no markdown fences. Include
+one object per article that IS a genuine deal (skip non-deal articles
+entirely — do not include them in the array). Each object must have this
+exact format:
 {{
-  "is_deal": true,
+  "i": <the article's number from above, as an integer>,
   "deal_date": "DD-Mon-YYYY, use the article's published/reported date if mentioned, otherwise today's date",
   "buyer": "the buyer's core company name only, no legal suffixes like Ltd/Pvt Ltd/Limited and no descriptive words",
   "target": "the target's core company/brand name only, no legal suffixes like Ltd/Pvt Ltd/Limited and no descriptive words",
@@ -202,23 +218,25 @@ this exact format, no other text, no markdown fences:
   "deal_value": "e.g. ₹245 Crore or 'Undisclosed'",
   "summary": "one or two sentence plain-English summary"
 }}
+
+If none of the {len(articles)} articles are genuine deals, respond with: []
 """
 
     headers = {"content-type": "application/json"}
     params = {"key": GEMINI_API_KEY}
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"maxOutputTokens": 1000, "temperature": 0.2},
+        "generationConfig": {"maxOutputTokens": 4000, "temperature": 0.2},
     }
 
     max_retries = 5
     for attempt in range(max_retries):
         try:
-            resp = requests.post(GEMINI_API_URL, headers=headers, params=params, json=body, timeout=30)
+            resp = requests.post(GEMINI_API_URL, headers=headers, params=params, json=body, timeout=60)
 
             if resp.status_code == 429:
-                wait = 15 * (attempt + 1)  # 15s, 30s, 45s, 60s, 75s
-                print(f"Rate limited (429) on '{article['title'][:50]}...' — waiting {wait}s (attempt {attempt+1}/{max_retries})")
+                wait = 20 * (attempt + 1)
+                print(f"Rate limited (429) on a batch of {len(articles)} articles — waiting {wait}s (attempt {attempt+1}/{max_retries})")
                 time.sleep(wait)
                 continue
 
@@ -227,24 +245,32 @@ this exact format, no other text, no markdown fences:
             text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
             text = text.replace("```json", "").replace("```", "").strip()
 
-            # Defensively extract just the JSON object in case of stray text
-            # or a truncated response (take the outermost braces found).
-            start = text.find("{")
-            end = text.rfind("}")
+            # Extract the outermost [...] array in case of stray text.
+            start = text.find("[")
+            end = text.rfind("]")
             if start == -1 or end == -1 or end < start:
-                raise ValueError(f"No JSON object found in response: {text[:200]!r}")
+                raise ValueError(f"No JSON array found in response: {text[:200]!r}")
             text = text[start:end + 1]
 
-            parsed = json.loads(text)
-            return parsed
+            results = json.loads(text)
+
+            # Attach the original article's link/title back onto each result
+            deals = []
+            for r in results:
+                idx = r.get("i")
+                if idx is None or not (0 <= idx < len(articles)):
+                    continue
+                r["link"] = articles[idx]["link"]
+                deals.append(r)
+
+            return deals, False  # (deals found, had_error)
 
         except Exception as e:
-            print(f"Classification failed for '{article['title']}': {e}")
-            return {"is_deal": False, "_error": True}
+            print(f"Batch classification failed ({len(articles)} articles): {e}")
+            return [], True
 
-    # Exhausted retries (kept getting rate limited)
-    print(f"Giving up on '{article['title']}' after {max_retries} rate-limit retries.")
-    return {"is_deal": False, "_error": True}
+    print(f"Giving up on a batch of {len(articles)} articles after {max_retries} rate-limit retries.")
+    return [], True
 
 
 # ---------------------------------------------------------------------
@@ -406,26 +432,30 @@ def main():
     articles = fetch_news()
     print(f"Fetched {len(articles)} candidate articles.")
 
+    # Only classify articles we haven't already processed before.
+    new_articles = [a for a in articles if a["link"] not in seen_links]
+    print(f"{len(new_articles)} of those are new (not previously seen).")
+
     candidate_deals = []
     newly_seen_links = set(seen_links)
+    batches = list(_chunked(new_articles, BATCH_SIZE))
+    print(f"Classifying in {len(batches)} batch(es) of up to {BATCH_SIZE} articles each.")
 
-    for article in articles:
-        if article["link"] in seen_links:
-            continue
+    for batch_num, batch in enumerate(batches, start=1):
+        deals, had_error = classify_batch(batch)
+        print(f"Batch {batch_num}/{len(batches)}: {len(batch)} articles -> {len(deals)} deal(s) found. Error: {had_error}")
 
-        result = classify_article(article)
-        time.sleep(6)  # respect gemini-2.5-flash-lite free-tier limit (~15 RPM)
+        candidate_deals.extend(deals)
 
-        if result.get("is_deal"):
-            result["link"] = article["link"]
-            candidate_deals.append(result)
+        # Only blacklist this batch's articles if the batch was actually
+        # evaluated successfully. If it errored/rate-limited, leave them
+        # unmarked so they get retried next run instead of being lost.
+        if not had_error:
+            for article in batch:
+                newly_seen_links.add(article["link"])
 
-        # Only blacklist this article if it was actually evaluated
-        # successfully. If classification errored/rate-limited, leave it
-        # unmarked so it gets retried on the next run instead of being
-        # silently lost forever.
-        if not result.get("_error"):
-            newly_seen_links.add(article["link"])
+        if batch_num < len(batches):
+            time.sleep(20)  # pause between batches to respect rate limits
 
     # Dedupe: multiple articles from different outlets often cover the same
     # underlying deal. Keep only the first occurrence of each (buyer, target,

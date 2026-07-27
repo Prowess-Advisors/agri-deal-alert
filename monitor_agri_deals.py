@@ -343,7 +343,7 @@ def send_email(deals):
         return
 
     today = datetime.now().strftime("%d %b %Y")
-    subject = f"🌾 India Food & Agri Alert – {len(deals)} new deal(s) – {today}"
+    subject = f"🌾 India Food & Agri Deal Alert – {len(deals)} new deal(s) – {today}"
 
     rows_html = ""
     for i, d in enumerate(deals):

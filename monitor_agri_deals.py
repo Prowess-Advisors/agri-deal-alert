@@ -383,10 +383,11 @@ def send_email(deals):
                         <div style="font-size:13px;color:#9fb8c7;margin-top:8px;">{today}</div>
                       </td>
                       <td style="padding:32px 36px;vertical-align:middle;text-align:right;white-space:nowrap;">
-                        <img src="data:image/png;base64,{PROWESS_LOGO_BASE64}" alt="Prowess Advisors" style="height:34px;width:auto;display:inline-block;" />
+                        <img src="data:image/png;base64,{PROWESS_LOGO_BASE64}" alt="Prowess Advisors" style="height:52px;width:auto;display:inline-block;" />
                       </td>
                     </tr>
                   </table>
+                  <div style="height:4px;background:#e07b39;line-height:4px;font-size:0;">&nbsp;</div>
                 </td>
               </tr>
 

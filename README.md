@@ -5,35 +5,44 @@ transaction (acquisition, investment, merger, JV, stake sale, etc.) is
 reported in India.
 
 ## How it works
-1. Searches Google News RSS every 2 hours for Food/Agri + transaction keywords.
-2. Sends each candidate article to Claude, which decides if it's a genuine
-   deal and extracts buyer, target, sector, deal value, and a summary.
-3. Skips deals already emailed before (tracked in `seen_deals.json`).
-4. Emails you an HTML table of the new deals.
+1. Searches Google News RSS every 3 hours across 29 Food/Agri sectors,
+   using Google's `when:` operator so results are filtered for recency
+   server-side (not just relevance).
+2. Sends new articles to Gemini in batches (not one call per article) so
+   it stays well within free-tier rate limits. Gemini decides which are
+   genuine deals and extracts buyer, target, sector, deal value, and a
+   summary.
+3. Dedupes by both article link and by the underlying deal itself (buyer +
+   target + deal type), so the same transaction covered by multiple outlets
+   is only ever emailed once.
+4. Emails you a styled HTML table of the new deals, with your logo in the
+   header.
 
 ## One-time setup (about 10 minutes)
 
 ### 1. Create a GitHub repository
-- Go to https://github.com/new, create a new **private** repo (e.g. `agri-deal-alert`).
-- Upload these files to it: `monitor_agri_deals.py`, `requirements.txt`,
-  `.github/workflows/agri-alert.yml`, this `README.md`.
+- Go to https://github.com/new, create a repo (e.g. `agri-deal-alert`).
+- Upload these files, preserving the folder structure:
+  - `monitor_agri_deals.py`
+  - `requirements.txt`
+  - `logo.png` (your Prowess Advisors logo — must sit in the repo root,
+    next to `monitor_agri_deals.py`)
+  - `.github/workflows/agri-alert.yml`
+  - this `README.md`
 
 ### 2. Get a Gemini API key
 - Go to https://aistudio.google.com/apikey and click **Create API key**.
 - Copy the key.
-- Gemini has a generous free tier, which should easily cover this use case
-  (a handful of articles classified every couple hours).
 
-### 3. Create a Gmail App Password (so the script can send from your Gmail)
-- Your Google Account must have 2-Step Verification turned on:
-  https://myaccount.google.com/security
+### 3. Create a Gmail App Password
+- Turn on 2-Step Verification: https://myaccount.google.com/security
 - Then go to https://myaccount.google.com/apppasswords
-- Create an app password (name it e.g. "Agri Deal Alert"), copy the 16-character code.
-- **Do not use your real Gmail password anywhere in this project — only this App Password.**
+- Create an app password, copy the 16-character code.
+- Never use your real Gmail password anywhere in this project — only this
+  App Password.
 
 ### 4. Add secrets to your GitHub repo
-In your repo: **Settings → Secrets and variables → Actions → New repository secret**.
-Add these four:
+**Settings → Secrets and variables → Actions → New repository secret**:
 
 | Secret name           | Value                                      |
 |-----------------------|---------------------------------------------|
@@ -43,33 +52,25 @@ Add these four:
 | `RECIPIENT_EMAIL`     | The email address to send alerts TO         |
 
 ### 5. Turn it on
-- Go to the **Actions** tab in your repo → you should see "India Food & Agri Deal Alert".
-- Click **Run workflow** to test it manually first.
-- After that, it runs automatically every 2 hours (edit the `cron` line in
-  `.github/workflows/agri-alert.yml` to change frequency — e.g. `0 * * * *`
-  for hourly).
+- Go to the **Actions** tab → "India Food & Agri Deal Alert" → **Run workflow**
+  to test it manually first.
+- After that it runs automatically every 3 hours.
 
 ## Customizing
-- **Sectors**: edit the `SECTORS` list in `monitor_agri_deals.py` (currently
-  28 sectors: Rice, Wheat, Pulses, Edible Oils, Palm/Soybean/Sunflower/Mustard
-  Oil, Tea, Coffee, Spices, Cashew, Dry Fruits, Fruits & Vegetables, Marine
-  Products, Poultry, Dairy, Meat Processing, Frozen Foods, Food Ingredients,
-  Bakery, Beverages, Animal Feed, Fertilizers, Seeds, Agrochemicals, Farm
-  Machinery, AgriTech).
-- **Transaction types**: edit the `TRANSACTION_TYPES` list (currently:
-  Acquisitions, Mergers, Fund Raising, PE/VC Investments, Joint Ventures,
-  Strategic Partnerships, Stake Sales, IPOs, Asset Acquisitions, Plant
-  Acquisitions, Distribution Partnerships).
-- Each sector is searched combined with all transaction types in one query
-  (e.g. `India Rice (acquisition OR merger OR ...)`), so the script makes
-  28 RSS calls per run — one per sector — rather than 28 × 12 separate calls.
-- **Frequency**: edit the `cron` schedule in the workflow file.
-- **Lookback window**: edit `LOOKBACK_HOURS` in the script.
+- **Sectors**: edit the `SECTORS` list in `monitor_agri_deals.py`.
+- **Frequency**: edit the `cron` schedule in the workflow file
+  (`0 */3 * * *` = every 3 hours; `0 * * * *` = hourly).
+- **Lookback window**: edit `LOOKBACK_HOURS` in the script (keep it >= the
+  gap between scheduled runs, so nothing falls in a gap).
+- **Batch size / pacing**: `BATCH_SIZE` and the `time.sleep(20)` between
+  batches control how many Gemini calls are made per run and how fast —
+  tune these if you hit rate limits.
 
 ## Notes & limitations
-- Google News RSS is free but occasionally misses smaller regional outlets —
-  you can add more specific RSS feeds (e.g. BSE/NSE announcement feeds,
-  FoodDialogues, Agriculture Post) to `SEARCH_QUERIES`/fetch logic later.
-- Deal values reported are only as accurate as the source news article.
-- This is for information/monitoring purposes — always verify significant
-  deals against the primary source before acting on them.
+- Private repos get a limited free tier of GitHub Actions minutes/month;
+  if you hit billing errors, either make the repo public (unlimited free
+  minutes) or reduce the schedule frequency.
+- Google News RSS is free but occasionally misses smaller regional outlets.
+- Deal values are only as accurate as the source article.
+- This is for information/monitoring purposes — verify significant deals
+  against the primary source before acting on them.

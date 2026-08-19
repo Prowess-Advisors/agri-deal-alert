@@ -2,8 +2,8 @@ name: India Food & Agri Deal Alert
 
 on:
   schedule:
-    # Runs every hour.
-    - cron: "0 * * * *"
+    # Runs every 3 hours.
+    - cron: "0 */3 * * *"
   workflow_dispatch: {}  # allows manual "Run workflow" trigger from GitHub UI
 
 concurrency:
